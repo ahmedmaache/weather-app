@@ -1,0 +1,180 @@
+name: Initialize Flutter App
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: 'App name'
+        required: true
+        type: string
+      package_name:
+        description: 'Android package name (e.g., com.example.app)'
+        required: true
+        type: string
+      description:
+        description: 'App description'
+        required: false
+        type: string
+        default: ''
+  repository_dispatch:
+    types: [initialize-flutter-app]
+
+jobs:
+  initialize:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: '17'
+    
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: 'stable'
+        channel: 'stable'
+        cache: true
+    
+    - name: Get app details
+      id: app_details
+      run: |
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          echo "app_name=${{ github.event.inputs.app_name }}" >> $GITHUB_OUTPUT
+          echo "package_name=${{ github.event.inputs.package_name }}" >> $GITHUB_OUTPUT
+          echo "description=${{ github.event.inputs.description }}" >> $GITHUB_OUTPUT
+        else
+          echo "app_name=${{ github.event.client_payload.app_name }}" >> $GITHUB_OUTPUT
+          echo "package_name=${{ github.event.client_payload.package_name }}" >> $GITHUB_OUTPUT
+          echo "description=${{ github.event.client_payload.description }}" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Create Flutter app structure
+      run: |
+        APP_NAME="${{ steps.app_details.outputs.app_name }}"
+        PACKAGE_NAME="${{ steps.app_details.outputs.package_name }}"
+        DESCRIPTION="${{ steps.app_details.outputs.description }}"
+        
+        # Extract org from package name
+        ORG=$(echo "$PACKAGE_NAME" | cut -d'.' -f1)
+        PROJECT_NAME=$(echo "$PACKAGE_NAME" | sed 's/\./_/g' | tr '[:upper:]' '[:lower:]')
+        
+        echo "Creating Flutter app: $APP_NAME"
+        echo "Package: $PACKAGE_NAME"
+        echo "Org: $ORG"
+        echo "Project: $PROJECT_NAME"
+        
+        # Create Flutter app
+        flutter create \
+          --org "$ORG" \
+          --project-name "$PROJECT_NAME" \
+          --description "$DESCRIPTION" \
+          --platforms android,ios,web \
+          .
+        
+        # Update package name in Android if needed
+        if [ -f "android/app/build.gradle" ]; then
+          sed -i "s/applicationId \".*\"/applicationId \"$PACKAGE_NAME\"/" android/app/build.gradle
+        fi
+        
+        if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
+          sed -i "s/package=\"[^\"]*\"/package=\"$PACKAGE_NAME\"/" android/app/src/main/AndroidManifest.xml
+        fi
+        
+        # Update pubspec.yaml with app name
+        if [ -f "pubspec.yaml" ]; then
+          sed -i "s/name: .*/name: $PROJECT_NAME/" pubspec.yaml
+          if [ -n "$DESCRIPTION" ]; then
+            sed -i "/^description:/a description: $DESCRIPTION" pubspec.yaml
+          fi
+        fi
+        
+        # Create README.md
+        cat > README.md << EOF
+# $APP_NAME
+
+$DESCRIPTION
+
+## Getting Started
+
+This Flutter app was initialized via GitHub Actions.
+
+### Prerequisites
+
+- Flutter SDK (stable)
+- Android Studio / Xcode (for mobile development)
+- VS Code or Android Studio (recommended)
+
+### Setup
+
+\`\`\`bash
+flutter pub get
+\`\`\`
+
+### Run
+
+\`\`\`bash
+flutter run
+\`\`\`
+
+### Build
+
+\`\`\`bash
+# Android APK
+flutter build apk --release
+
+# Android App Bundle
+flutter build appbundle --release
+
+# iOS (requires macOS)
+flutter build ios --release
+
+# Web
+flutter build web --release
+\`\`\`
+
+## Package Information
+
+- **Package Name**: \`$PACKAGE_NAME\`
+- **App Name**: \`$APP_NAME\`
+
+## CI/CD
+
+This repository includes GitHub Actions workflows for:
+- Automated testing
+- Building APK and App Bundle
+- Creating releases
+
+## Development
+
+Open this repository in GitHub Codespaces for instant Flutter development environment.
+
+EOF
+    
+    - name: Configure Git
+      run: |
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+    
+    - name: Commit Flutter app structure
+      run: |
+        git add .
+        git commit -m "Initialize Flutter app: ${{ steps.app_details.outputs.app_name }}" || exit 0
+        git push origin HEAD:${{ github.ref_name }} || exit 0
+    
+    - name: Create summary
+      run: |
+        echo "## Flutter App Initialized ✅" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **App Name**: ${{ steps.app_details.outputs.app_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Package Name**: ${{ steps.app_details.outputs.package_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Description**: ${{ steps.app_details.outputs.description }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "The Flutter app structure has been created and committed to the repository." >> $GITHUB_STEP_SUMMARY
+
